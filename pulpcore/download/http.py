@@ -6,6 +6,8 @@ import backoff
 
 from pulpcore.exceptions import (
     DigestValidationError,
+    DnsDomainNameException,
+    ProxyAuthenticationError,
     SizeValidationError,
     TimeoutException,
 )
@@ -236,6 +238,7 @@ class HttpDownloader(BaseDownloader):
             aiohttp.ClientPayloadError,
             aiohttp.ClientResponseError,
             aiohttp.ServerDisconnectedError,
+            DnsDomainNameException,
             TimeoutError,
             TimeoutException,
             DigestValidationError,
@@ -269,7 +272,7 @@ class HttpDownloader(BaseDownloader):
                             e.message,
                         )
                     )
-                    raise e
+                    raise ProxyAuthenticationError(self.proxy)
 
             return await download_wrapper()
 
@@ -296,10 +299,13 @@ class HttpDownloader(BaseDownloader):
         }
         if extra_data and extra_data.get("request_kwargs"):
             request_kwargs.update(extra_data["request_kwargs"])
-        async with self.session.get(self.url, **request_kwargs) as response:
-            self.raise_for_status(response)
-            to_return = await self._handle_response(response)
-            await response.release()
+        try:
+            async with self.session.get(self.url, **request_kwargs) as response:
+                self.raise_for_status(response)
+                to_return = await self._handle_response(response)
+                await response.release()
+        except aiohttp.ClientConnectorDNSError:
+            raise DnsDomainNameException(self.url)
         if self._close_session_on_finalize:
             await self.session.close()
         return to_return
